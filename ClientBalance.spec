@@ -36,9 +36,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
-app = BUNDLE(
-    exe,
-    name='ClientBalance.app',
-    icon=None,
-    bundle_identifier=None,
-)
+# BUNDLE e exclusivo para macOS - nao incluir no build Windows
