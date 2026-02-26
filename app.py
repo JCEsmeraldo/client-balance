@@ -27,36 +27,61 @@ def formatar_moeda(valor_float: float) -> str:
     return f"R$ {valor_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def aplicar_mascara_moeda(entry: ctk.CTkEntry, var: ctk.StringVar):
+def aplicar_mascara_moeda(entry: ctk.CTkEntry, var: ctk.StringVar = None):
     """
-    Registra um trace na StringVar para formatar o campo como moeda
-    enquanto o usuario digita. Aceita digitos e virgula/ponto.
-    """
-    _aplicando = False
+    Aplica máscara de moeda BR no entry via KeyRelease.
+    - O usuário digita apenas números (vírgula/ponto são ignorados).
+    - Os dígitos acumulados são exibidos como inteiro com separador de milhar.
+    - Ex: digitar 1 -> "1", digitar 500 -> "1.500", digitar 00 -> "1.500,00"
+      (sem modo centavos — o usuário digita o valor exato inteiro ou com vírgula manual)
 
-    def _on_change(*_):
-        nonlocal _aplicando
-        if _aplicando:
+    Estratégia simples e sem bug de cursor:
+    - Mantém apenas dígitos e UMA vírgula opcional.
+    - Formata a parte inteira com pontos de milhar.
+    - Cursor sempre vai ao final após formatação.
+    """
+    _bloqueado = [False]
+
+    def _formatar(event=None):
+        if _bloqueado[0]:
             return
-        _aplicando = True
+        _bloqueado[0] = True
         try:
-            raw = var.get()
-            # Mantém apenas dígitos
-            digits = "".join(c for c in raw if c.isdigit())
-            if not digits:
-                var.set("")
-                return
-            # Interpreta como centavos
-            centavos = int(digits)
-            reais = centavos / 100
-            # Formata: 1.234,56
-            formatado = f"{reais:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            var.set(formatado)
-            entry.icursor("end")
-        finally:
-            _aplicando = False
+            raw = entry.get()
 
-    var.trace_add("write", _on_change)
+            # Separa parte inteira e decimal (aceita vírgula ou ponto como separador)
+            raw_norm = raw.replace(".", "").replace(",", ".")
+            if "." in raw_norm:
+                partes = raw_norm.split(".")
+                inteiros = "".join(c for c in partes[0] if c.isdigit())
+                decimais = "".join(c for c in partes[1] if c.isdigit())[:2]
+            else:
+                inteiros = "".join(c for c in raw_norm if c.isdigit())
+                decimais = None
+
+            if not inteiros and decimais is None:
+                return  # campo vazio, não mexe
+
+            # Remove zeros à esquerda, mantém ao menos "0"
+            inteiros = inteiros.lstrip("0") or "0"
+
+            # Formata parte inteira com pontos de milhar
+            inteiros_fmt = f"{int(inteiros):,}".replace(",", ".")
+
+            if decimais is not None:
+                formatado = f"{inteiros_fmt},{decimais}"
+            else:
+                formatado = inteiros_fmt
+
+            if entry.get() != formatado:
+                entry.delete(0, "end")
+                entry.insert(0, formatado)
+                entry.icursor("end")
+        finally:
+            _bloqueado[0] = False
+
+    # Vincula ao KeyRelease para formatar após cada tecla
+    entry.bind("<KeyRelease>", _formatar)
 
 
 def valor_do_campo_moeda(entry: ctk.CTkEntry) -> float:
@@ -697,15 +722,19 @@ class ClientesTab(ctk.CTkFrame):
 
         # Botões
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_frame.grid(row=3, column=0, columnspan=4, pady=(6, 12), padx=12, sticky="e")
+        btn_frame.grid(row=3, column=0, columnspan=4, pady=(6, 12), padx=12, sticky="w")
 
-        ctk.CTkButton(btn_frame, text="Salvar", width=90, command=self._salvar).pack(side="left", padx=4)
-        ctk.CTkButton(btn_frame, text="Editar", width=90, fg_color="#2e7d32", hover_color="#388e3c",
-                      command=self._editar).pack(side="left", padx=4)
-        ctk.CTkButton(btn_frame, text="Excluir", width=90, fg_color="#c62828", hover_color="#d32f2f",
-                      command=self._excluir).pack(side="left", padx=4)
-        ctk.CTkButton(btn_frame, text="Limpar", width=90, fg_color="gray40", hover_color="gray50",
-                      command=self._limpar_form).pack(side="left", padx=4)
+        ctk.CTkButton(btn_frame, text="Salvar",  width=90,
+                      command=self._salvar).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_frame, text="Editar",  width=90,
+                      fg_color="#2e7d32", hover_color="#388e3c",
+                      command=self._editar).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_frame, text="Excluir", width=90,
+                      fg_color="#c62828", hover_color="#d32f2f",
+                      command=self._excluir).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_frame, text="Limpar",  width=90,
+                      fg_color="gray40", hover_color="gray50",
+                      command=self._limpar_form).pack(side="left", padx=(0, 6))
 
     # ── Tabela ───────────────────────────────────────────────────────────
 
@@ -850,56 +879,60 @@ class MovimentacoesTab(ctk.CTkFrame):
         frame = ctk.CTkFrame(self, corner_radius=10)
         frame.pack(fill="x", padx=16, pady=(16, 8))
 
+        # Configura colunas: label | campo | label | campo
+        frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(3, weight=1)
+
         ctk.CTkLabel(frame, text="Nova Movimentacao", font=ctk.CTkFont(size=15, weight="bold")).grid(
             row=0, column=0, columnspan=4, pady=(10, 6), padx=12, sticky="w"
         )
 
-        # Cliente
+        # Linha 1: Cliente | Tipo
         ctk.CTkLabel(frame, text="Cliente *").grid(row=1, column=0, padx=(12, 4), pady=4, sticky="w")
-        self.cmb_cliente = ComboBoxBusca(frame, width=220, values=[])
+        self.cmb_cliente = ComboBoxBusca(frame, width=240, values=[])
         self.cmb_cliente.grid(row=1, column=1, padx=4, pady=4, sticky="w")
 
-        # Tipo
         ctk.CTkLabel(frame, text="Tipo *").grid(row=1, column=2, padx=(16, 4), pady=4, sticky="w")
         self.seg_tipo = ctk.CTkSegmentedButton(frame, values=["Entrada", "Saida"])
         self.seg_tipo.set("Entrada")
         self.seg_tipo.grid(row=1, column=3, padx=(4, 12), pady=4, sticky="w")
 
-        # Data da movimentação (com botão calendário)
+        # Linha 2: Data | Método
         ctk.CTkLabel(frame, text="Data *").grid(row=2, column=0, padx=(12, 4), pady=4, sticky="w")
         self.ent_data = CampoData(frame, width=160,
                                   valor_inicial=date.today().strftime("%Y-%m-%d"))
         self.ent_data.grid(row=2, column=1, padx=4, pady=4, sticky="w")
 
-        # Método de pagamento
         ctk.CTkLabel(frame, text="Metodo").grid(row=2, column=2, padx=(16, 4), pady=4, sticky="w")
         self.seg_metodo = ctk.CTkSegmentedButton(frame, values=["Dinheiro", "PIX", "Debito", "Credito"])
         self.seg_metodo.set("PIX")
         self.seg_metodo.grid(row=2, column=3, padx=(4, 12), pady=4, sticky="w")
 
-        # Valor
+        # Linha 3: Valor | Descrição
         ctk.CTkLabel(frame, text="Valor *").grid(row=3, column=0, padx=(12, 4), pady=4, sticky="w")
-        self._var_valor = ctk.StringVar()
-        self.ent_valor = ctk.CTkEntry(frame, width=220, placeholder_text="0,00", textvariable=self._var_valor)
+        self.ent_valor = ctk.CTkEntry(frame, width=240, placeholder_text="Ex: 1500,00")
         self.ent_valor.grid(row=3, column=1, padx=4, pady=4, sticky="w")
-        aplicar_mascara_moeda(self.ent_valor, self._var_valor)
+        aplicar_mascara_moeda(self.ent_valor)
 
-        # Descrição
         ctk.CTkLabel(frame, text="Descricao").grid(row=3, column=2, padx=(16, 4), pady=4, sticky="w")
-        self.ent_desc = ctk.CTkEntry(frame, width=220, placeholder_text="Descricao da movimentacao")
+        self.ent_desc = ctk.CTkEntry(frame, width=240, placeholder_text="Descricao da movimentacao")
         self.ent_desc.grid(row=3, column=3, padx=(4, 12), pady=4, sticky="w")
 
-        # Botões
+        # Linha 4: botões — alinhados à esquerda para sempre ficarem visíveis
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_frame.grid(row=4, column=0, columnspan=4, pady=(6, 12), padx=12, sticky="e")
+        btn_frame.grid(row=4, column=0, columnspan=4, pady=(6, 12), padx=12, sticky="w")
 
-        ctk.CTkButton(btn_frame, text="Salvar", width=90, command=self._salvar).pack(side="left", padx=4)
-        ctk.CTkButton(btn_frame, text="Excluir", width=90, fg_color="#c62828", hover_color="#d32f2f",
-                      command=self._excluir).pack(side="left", padx=4)
-        ctk.CTkButton(btn_frame, text="Limpar", width=90, fg_color="gray40", hover_color="gray50",
-                      command=self._limpar_form).pack(side="left", padx=4)
-        ctk.CTkButton(btn_frame, text="Exportar Excel", width=120, fg_color="#1565c0", hover_color="#1976d2",
-                      command=self._exportar_excel).pack(side="left", padx=4)
+        ctk.CTkButton(btn_frame, text="Salvar",        width=90,
+                      command=self._salvar).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_frame, text="Excluir",       width=90,
+                      fg_color="#c62828", hover_color="#d32f2f",
+                      command=self._excluir).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_frame, text="Limpar",        width=90,
+                      fg_color="gray40", hover_color="gray50",
+                      command=self._limpar_form).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_frame, text="Exportar Excel", width=130,
+                      fg_color="#1565c0", hover_color="#1976d2",
+                      command=self._exportar_excel).pack(side="left", padx=(0, 6))
 
     # ── Tabela ───────────────────────────────────────────────────────────
 
@@ -949,7 +982,7 @@ class MovimentacoesTab(ctk.CTkFrame):
 
     def _limpar_form(self):
         self._id_mov_selecionada = None
-        self._var_valor.set("")
+        self.ent_valor.delete(0, "end")
         self.ent_desc.delete(0, "end")
         self.ent_data.delete(0, "end")
         self.ent_data.insert(0, date.today().strftime("%Y-%m-%d"))
@@ -1484,8 +1517,8 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Client Balance - Controle Financeiro")
-        self.geometry("900x620")
-        self.minsize(860, 560)
+        self.geometry("1000x660")
+        self.minsize(960, 580)
 
         # Banco de dados
         self.db = Database("banco.db")
