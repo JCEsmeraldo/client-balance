@@ -904,7 +904,7 @@ class MovimentacoesTab(ctk.CTkFrame):
         self.ent_data.grid(row=2, column=1, padx=4, pady=4, sticky="w")
 
         ctk.CTkLabel(frame, text="Metodo").grid(row=2, column=2, padx=(16, 4), pady=4, sticky="w")
-        self.seg_metodo = ctk.CTkSegmentedButton(frame, values=["Dinheiro", "PIX", "Debito", "Credito"])
+        self.seg_metodo = ctk.CTkSegmentedButton(frame, values=["Dinheiro", "PIX", "Debito", "Credito", "Voucher", "Boleto"])
         self.seg_metodo.set("PIX")
         self.seg_metodo.grid(row=2, column=3, padx=(4, 12), pady=4, sticky="w")
 
